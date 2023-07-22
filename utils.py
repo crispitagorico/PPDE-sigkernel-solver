@@ -113,14 +113,14 @@ def sig_kernel_matrices(X_samples, Y_samples, Z_samples, sig_kernel, max_batch, 
     Y_samples = torch.tensor(Y_samples, dtype=torch.float64, device=device)
     Z_samples = torch.tensor(Z_samples, dtype=torch.float64, device=device)
 
-    eps_diff = 1e-4
-    M = sig_kernel.compute_Gram(X_samples, Y_samples, max_batch=max_batch)    
-    M_eps  = sig_kernel.compute_Gram(X_samples + eps_diff*Z_samples, Y_samples, max_batch=max_batch)
-    M_2eps = sig_kernel.compute_Gram(X_samples + 2.*eps_diff*Z_samples, Y_samples, max_batch=max_batch)
-    M_diff      = (1./eps_diff)*(M_eps - M)
-    M_diff_diff = (1./eps_diff)*((1./eps_diff)*(M_2eps - M_eps)-M_diff)
+    # eps_diff = 1e-4
+    # M = sig_kernel.compute_Gram(X_samples, Y_samples, max_batch=max_batch)    
+    # M_eps  = sig_kernel.compute_Gram(X_samples + eps_diff*Z_samples, Y_samples, max_batch=max_batch)
+    # M_2eps = sig_kernel.compute_Gram(X_samples + 2.*eps_diff*Z_samples, Y_samples, max_batch=max_batch)
+    # M_diff      = (1./eps_diff)*(M_eps - M)
+    # M_diff_diff = (1./eps_diff)*((1./eps_diff)*(M_2eps - M_eps)-M_diff)
     
-    # M, M_diff, M_diff_diff = sig_kernel.compute_kernel_and_derivatives_Gram(X_samples, Y_samples, Z_samples, max_batch=max_batch)
+    M, M_diff, M_diff_diff = sig_kernel.compute_kernel_and_derivatives_Gram(X_samples, Y_samples, Z_samples, max_batch=max_batch)
     
     return M.cpu().numpy(), M_diff.cpu().numpy(), M_diff_diff.cpu().numpy()
 
@@ -204,44 +204,3 @@ def generate_theta_paths(t_inds, n_increments, T, a):
         paths.append(path)
     
     return np.array(paths)
-
-# def generate_X_theta_paths(t_inds, n_increments, T, a):
-    
-#     dt     = np.sqrt(T/n_increments)
-#     t_grid = np.linspace(0, T, n_increments+1)
-
-#     C     = cov(a, n_increments)
-#     L     = np.linalg.cholesky(C)
-#     L_inv = np.linalg.inv(L)
-    
-#     paths  = []
-#     for t_ind in t_inds:
-
-#         dW_ = generate_dW1(a, n_increments, 1)
-#         X   = generate_X(a, dW_)[0]
-#         dW  = np.einsum('ij, pqj -> pqi', L_inv, dW_)[0,:,0]*dt
-        
-#         path = np.zeros((n_increments+1, 2))
-#         path[:,0] = t_grid
-#         path[:t_ind+1,1] = X[:t_ind+1] 
-#         for (i,s) in zip(range(t_ind+1, len(t_grid)), t_grid[t_ind+1:]):
-#             path[i,1] = np.sqrt(2*a+1.)*np.sum([((s-t_grid[j+1])**a)*dW[j] for j in range(t_ind)]) 
-#         paths.append(path)   
-    
-#     return np.array(paths)
-
-# def plot_results(mc_prices, sig_prices, m, n, error_fn, error_name):
-#     r2_score = r2(mc_prices, sig_prices)
-#     error = error_fn(mc_prices, sig_prices)
-#     fig, ax = plt.subplots(1, 2, figsize=(16,5))
-#     ax[0].plot(mc_prices, label='mc_prices')
-#     ax[0].plot(sig_prices, label='sig_prices')
-#     ax[0].set_title(f"Interior cpts: {m} --- Boundary cpts: {n} --- {error_name} = {np.round(error, 5)}")
-#     ax[0].legend()
-#     ax[1].scatter(mc_prices, sig_prices, label='mc_prices')
-#     ax[1].set_xlabel('mc_prices') 
-#     ax[1].set_ylabel('sig_prices')
-#     ax[1].set_title(f"$R^2$ = {np.round(r2_score, 3)}")
-#     ax[1].plot([0,1],[0,1])
-#     plt.tight_layout()
-#     plt.show()
