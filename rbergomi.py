@@ -1,6 +1,9 @@
 import numpy as np
+from tqdm import tqdm
 from utils import *
 from scipy.optimize import minimize, basinhopping
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class rBergomi_MC_pricer(object):
     """Class for conditional MC pricer under rough Bergomi """
@@ -41,7 +44,7 @@ class rBergomi_sigkernel_pricer(object):
     """
     Class for conditional sigkernel pricer under rough Bergomi.
     """
-    def __init__(self, n_increments, x_var, m, n, T, a, xi, eta, rho, sigma_t, sigma_x, sigma_sig, dyadic_order, max_batch, device):
+    def __init__(self, n_increments, x_var, m, n, T, a, xi, eta, rho, sigma_t, sigma_x, sigma_sig, dyadic_order, max_batch, device, lambda_):
         self.n_increments  = n_increments        
         self.x_var         = x_var
         self.m             = m 
@@ -59,9 +62,10 @@ class rBergomi_sigkernel_pricer(object):
         self.dyadic_order  = dyadic_order 
         self.max_batch     = max_batch
         self.device        = device
-        # self.static_kernel = sigkernel.LinearKernel(scale=1.)
-        self.static_kernel = sigkernel.RBFKernel(sigma=sigma_sig)
+        self.static_kernel = sigkernel.LinearKernel(scale=sigma_sig)
+        # self.static_kernel = sigkernel.RBFKernel(sigma=sigma_sig)
         self.sig_kernel    = sigkernel.SigKernel(self.static_kernel, dyadic_order=dyadic_order)
+        self.lambda_       = lambda_
         
     def _generate_ts(self):
         """Generate m interior times uniformly at random on [0,T) and n boundary times = T"""
@@ -161,10 +165,42 @@ class rBergomi_sigkernel_pricer(object):
         M_down      = np.concatenate([self.K_hat, np.zeros_like(self.K_hat)], axis=1)
         M           = np.concatenate([M_up, M_down], axis=0)
         rhs_        = np.concatenate([np.zeros([self.m+self.n]), self.rhs])
-        self.alphas = (np.linalg.pinv(M) @ rhs_)[:self.m+self.n]
+        self.alphas = (np.linalg.pinv(M + self.lambda_*np.eye(M.shape[0])) @ rhs_)[:self.m+self.n]
     
     def predict(self, t_inds_eval, xs_eval, paths_eval):
         ts_eval = np.array([self.t_grid[t_ind] for t_ind in t_inds_eval])
         K_eval  = self.mixed_kernel_matrix(ts_eval, self.ts, xs_eval, self.xs, paths_eval, self.paths)
         return np.matmul(K_eval, self.alphas)
     
+def grid_search_sigkernel_rBergomi(a, strike, payoff, T, xi, eta, rho, n_incs, x_var, dyadic_order, max_batch, error_fn):
+    
+    m, n = 100, 75
+    n_eval = 50
+    n_mc_exact = 1000
+
+    t_inds_eval = np.random.choice(n_incs, n_eval)
+    xs_eval     = generate_xs(xi, x_var, t_inds_eval)
+    paths_eval  = generate_theta_paths(t_inds_eval, n_incs, T, a)
+
+    mc_pricer_exact = rBergomi_MC_pricer(n_incs, n_mc_exact, T, a, xi, eta, rho)
+    mc_prices_exact = mc_pricer_exact.fit_predict(t_inds_eval, xs_eval, paths_eval, payoff)
+
+    # we don't search over sigma_t and sigma_x
+    sigma_x = 1e0
+    # sigmas = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1e0, 5e0, 1e1, 5e1, 1e2, 5e2, 1e3, 5e3, 1e4, 5e4, 1e5, 5e5]
+    sigmas = [1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1, 1e0, 5e0, 1e1, 5e1, 1e2]
+    sigmas_ = [1e-3, 1e-2, 1e-1, 1e0, 1e1, 1e2, 1e3]
+    error = 1e5
+    for sigma_sig in tqdm(sigmas):
+        for sigma_t in tqdm(sigmas_):
+            for sigma_x in sigmas_:
+                for lambda_ in [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]:
+                    sig_pricer = rBergomi_sigkernel_pricer(n_incs, x_var, m, n, T, a, xi, eta, rho, sigma_t, sigma_x, sigma_sig, dyadic_order, max_batch, device, lambda_)
+                    sig_pricer.fit(payoff)
+                    sig_prices = sig_pricer.predict(t_inds_eval, xs_eval, paths_eval) 
+                    error_pred = error_fn(mc_prices_exact, sig_prices)
+                    if error_pred < error: 
+                        error = error_pred
+                        sigma_t_best, sigma_x_best, sigma_sig_best, lambda_best = sigma_t, sigma_x, sigma_sig, lambda_
+
+    return sigma_t_best, sigma_x_best, sigma_sig_best, lambda_best, error
